@@ -66,6 +66,29 @@ class Image(BaseXmlModel, tag='image', nsmap=NSMAP):
         """
         return Path(self.a_href).suffix
 
+    @computed_field
+    @property
+    def is_desk_share_image(self) -> bool:
+        """
+        Test si l'image est un partage d'écran
+        """
+        return not self.a_text
+
+    @computed_field
+    @property
+    def width(self) -> int:
+        """
+        Donne la largeur
+        """
+        return self.a_width
+
+    @computed_field
+    @property
+    def height(self) -> int:
+        """
+        Donne la taille
+        """
+        return self.a_height
 class Svg(RootXmlModel, tag='svg', nsmap=NSMAP):
     """
     Noeud svg

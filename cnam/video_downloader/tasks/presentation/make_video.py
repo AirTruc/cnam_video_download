@@ -1,13 +1,13 @@
 """
-Ce fichier est dédié la création de la vidéo final en fonction des différents éléments téléchargés
+Ce fichier est dédié la création de la vidéo final en fonction des différents éléments téléchargés.
 """
 from typing import List, Dict, Callable
 from pathlib import Path
 from pydantic import BaseModel
 
+from moviepy import VideoFileClip, VideoClip, AudioClip
 
-from moviepy import ImageClip, VideoFileClip, AudioFileClip, VideoClip, AudioClip
-
+from cnam.video_downloader.utils import ffmpeg_bin
 
 Time = float
 Position = int
@@ -147,7 +147,6 @@ class ConvertVideo(ConvertElement):
     """
     Information pour la conversion d'une vidéo.
     """
-    get_clip: GetVideoClip
     start: Time
 
 
@@ -155,7 +154,6 @@ class ConvertAudio(ConvertElement):
     """
     Information utile pour la conversion d'un audio.
     """
-    get_clip: GetAudioClip
 
 
 class ConvertToCompose(BaseModel):
@@ -199,6 +197,7 @@ def get_path_of_videos(videos_convert: ConvertToCompose):
     """
     Donne tous les chemins des vidéos converties.
     """
+    print(videos_convert)
     return [video.target for video in videos_convert.videos]
 
 
@@ -216,25 +215,27 @@ def ffmpeg_to_composite(videos_convert: ConvertToCompose, duration_in_ms, target
     file_concat = Path(targets[0] + "_concat.txt")
     video_without_audio = Path(targets[0] + "_video_without_audio.mp4")
     video = targets[0]
+    video_to_concat = get_path_of_videos(videos_convert)
     yield {
         "name": file_concat,
         "actions": [(build_list_concat_file, [])],
-        "file_dep": get_path_of_videos(videos_convert),
+        "file_dep": video_to_concat,
         "targets": [file_concat],
     }
     yield {
         "name": video_without_audio,
         "actions": [
-            f"ffmpeg -y -f concat -safe 0 -i {file_concat} -c copy"
-            f" -video_track_timescale 600 -t {duration_in_ms}ms {video_without_audio}"
+            f"{ffmpeg_bin.get()} -y -f concat -safe 0 -i {file_concat} -c copy"
+            #f" -video_track_timescale 600 "
+            f" -t '{duration_in_ms}ms' {video_without_audio}"
         ],
-        "file_dep": [file_concat],
+        "file_dep": [file_concat] + video_to_concat,
         "targets": [video_without_audio],
     }
     yield {
         "name": video,
         "actions": [
-            f"ffmpeg -y -i {video_without_audio} -i {videos_convert.audio.target} -c copy  {video}"
+            f"{ffmpeg_bin.get()} -y -i {video_without_audio} -i {videos_convert.audio.target} -c copy  {video}"
         ],
         "file_dep": [video_without_audio, videos_convert.audio.target],
         "targets": [video],
@@ -246,22 +247,15 @@ def to_image_clip(source: Slide, width, height):
     Transforme une image en vidéo.
     """
     target = str(source.path.with_suffix(".mp4"))
-    end = source.end if source.end > 1 else 1
-    img = (
-        ImageClip(source.path)
-        .with_start(source.start)
-        .with_duration(end)
-        .with_position(("center", "center"))
-    )
     return ConvertVideo(
         source=source.path,
         target=target,
-        get_clip=lambda: img,
         action={
             "name": target,
             "actions": [
-                f"ffmpeg -y -loop 1 -i {source.path} -c:v libx264 -t '{source.end - source.start}s'"
-                f" -pix_fmt yuv420p -vf scale={width}:{height} {target}"
+                f"{ffmpeg_bin.get()} -y -loop 1 -i '{source.path}' -c:v libx264"
+                f" -t '{source.end - source.start}s'"
+                f" -pix_fmt yuv420p -vf 'scale=ceil({width}/2)*2:ceil({height}/2)*2' -r 5 '{target}'"
             ],
             "file_dep": [source.path],
             "targets": [target],
@@ -307,11 +301,10 @@ def convert_audio(audio_file) -> ConvertVideo:
     return ConvertAudio(
         source=audio_file,
         target=target,
-        get_clip=lambda: AudioFileClip(target),
         action={
             "name": target,
             "actions": [
-                f'ffmpeg -y -i "{audio_file}" -ac 2 -c:a libopus -b:a 96K {target}'
+                f'{ffmpeg_bin.get()} -y -i "{audio_file}" -ac 2 -c:a libopus -b:a 96K {target}'
             ],
             "file_dep": [audio_file],
             "targets": [target],
@@ -331,26 +324,29 @@ def desk_shares_to_video(
 
 
 def convert_desk_shares(
-    desk_shares: DeskShares, _: Dimension
+    desk_shares: DeskShares, dimension: Dimension
 ) -> List[ConvertVideo]:
     """
     Converti le partage d'écran en vidéo.
     """
     def build_convert(index: int, path: Path, desk_share: DeskShare):
         target = Path(path.parent, f"{path.stem}_{index}.mp4")
+        target_tmp = target.with_suffix('.tmp.mp4')
         return ConvertVideo(
             source=path,
             target=target,
-            get_clip=lambda: VideoFileClip(target),
             action={
                 "name": target,
                 "actions": [
-                    f"ffmpeg -y -ss '{desk_share.start}s' -t '{desk_share.end-desk_share.start}s'"
-                    f" -i '{path}' -acodec copy -vcodec copy '{target}'"
+                    f"{ffmpeg_bin.get()} -y -ss '{desk_share.start}s' -t '{desk_share.end-desk_share.start}s'"
+                    f" -i '{path}' -acodec copy -vcodec copy '{target_tmp}'",
+                    f"{ffmpeg_bin.get()} -y -i '{target_tmp}' -filter:v fps=25 "
+                    f"-vf 'scale=ceil({dimension.width}/2)*2:ceil({dimension.height}/2)*2' '{target}'"
                 ],
                 "file_dep": [path],
                 "targets": [target],
             },
+            verbosity=2,
             start=desk_share.start,
         )
 
@@ -368,7 +364,6 @@ def convert_external_videos(external_videos: List[ExternalVideo]) -> List[Conver
         return ConvertVideo(
             source=external_video.path,
             target=external_video.path,
-            get_clip=lambda: VideoFileClip(external_video.path),
             action={},
             start=external_video.start,
         )
@@ -390,13 +385,20 @@ def make_video_task(
     output: Path,
     slides: Slides,
     metadata: Metadata,
+    dimension: Dimension,
     audio_file: Path = None,
     desk_shares: DeskShares = None,
     external_videos: List[ExternalVideo] = None,
 ):
     """
     Créer les tâches de création de vidéo.
+    Pour que la vidéo finale n'est pas de soucis, il faut que les vidéos aient les mêmes tailles et
+    le même FPS.
+
     """
+    max_width = dimension.width
+    max_height = dimension.height
+
     converts = []
     videos_to_compose = ConvertToCompose()
     if audio_file:
@@ -405,10 +407,12 @@ def make_video_task(
         converts.append(convert)
     for slide in slides:
         # converts.append(to_image_clip(slide))
-        converts.append(convert_video(slide, width=960, height=540))
+        converts.append(convert_video(slide, width=max_width, height=max_height))
     file_dep = []
     if desk_shares:
-        converts.extend(convert_desk_shares(desk_shares, get_size(slides[0])))
+        converts.extend(
+            convert_desk_shares(desk_shares, Dimension(width=max_width, height=max_height))
+        )
     if external_videos:
         converts.extend(convert_external_videos(external_videos=external_videos))
     for convert in converts:
@@ -416,6 +420,7 @@ def make_video_task(
             videos_to_compose.add_video(convert)
         file_dep.append(convert.target)
         if convert.action:
+            print(convert.action)
             yield convert.action
     # yield {
     #    'name': output,

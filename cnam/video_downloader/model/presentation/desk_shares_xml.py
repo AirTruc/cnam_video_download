@@ -9,6 +9,7 @@ Voici un exemple de contenu :
 </recording>
 """
 from typing import List
+from pydantic import computed_field
 from pydantic_xml import BaseXmlModel, RootXmlModel, attr, element
 
 
@@ -22,6 +23,22 @@ class Event(BaseXmlModel, tag='event'):
     stop_timestamp: float = attr()
     video_width: int = attr()
     video_height: int = attr()
+
+    @computed_field
+    @property
+    def width(self) -> int:
+        """
+        La largeur
+        """
+        return self.video_width
+
+    @computed_field
+    @property
+    def height(self) -> int:
+        """
+        La hauteur
+        """
+        return self.video_height
 
 class Recording(RootXmlModel, tag='recording'):
     """

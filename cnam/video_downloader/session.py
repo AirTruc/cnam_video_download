@@ -2,6 +2,8 @@
 Contient les fonctions liées à l'authentification sur le site du CNAM.
 """
 from contextvars import ContextVar
+from typing import Callable
+
 from bs4 import BeautifulSoup
 import requests
 requests_session: ContextVar[requests.Session] = ContextVar("requests_session")
@@ -48,3 +50,19 @@ def authentification(username:str, password:str):
         )
 
     requests_session.set(session)
+
+def default_get(url):
+    """
+    Session par defaut
+    """
+    session = requests_session.get()
+    return session.get(url)
+
+def download_file(path, get:Callable[[str], requests.Response]=default_get,*, targets):
+    """
+    Télécharge un fichier depuis le site du CNAM
+    """
+    req = get(path)
+    if req.status_code == 200:
+        with open(targets[0], mode="wb") as fd:
+            fd.write(req.content)

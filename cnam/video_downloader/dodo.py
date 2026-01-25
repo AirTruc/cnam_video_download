@@ -13,10 +13,10 @@ from pydantic import  BaseModel
 
 
 from cnam.video_downloader.tasks.presentation.presentation import Presentation, PresentationId
-from cnam.video_downloader.tasks.eu.eu import EuTask, base_dir
+from cnam.video_downloader.tasks.eu.eu import EuTask, base_dir, EuId
 from cnam.video_downloader.enseignement import Enseignement
 from cnam.video_downloader.session import authentification
-from cnam.video_downloader.utils import youtube_dl_bin
+from cnam.video_downloader.utils import youtube_dl_bin, ffmpeg_bin
 
 
 class Credential(BaseModel):
@@ -37,7 +37,9 @@ class MyLoader(TaskLoader2):
                  presentation_urls,
                  *,
                  credential:Credential,
-                 verbosity
+                 verbosity,
+                 yt_dl_path,
+                 ffmpeg_path
     ):
         super().__init__()
         self.eu_id_items = eu_id_items
@@ -45,18 +47,26 @@ class MyLoader(TaskLoader2):
         self.credential = credential
         self.verbosity = verbosity
         base_dir.set(output_dir)
-        youtube_dl_bin.set('yt-dlp')
+        youtube_dl_bin.set(yt_dl_path)
+        ffmpeg_bin.set(ffmpeg_path)
 
     def setup(self, opt_values):
         authentification(self.credential.username, self.credential.password)
 
     def load_doit_config(self):
-        return {'verbosity': self.verbosity}
+        return {'verbosity': self.verbosity, 'action_string_formatting':'new'}
 
     def load_tasks(self, cmd, pos_args):
+        def get_eu_id_in_enseignement(eu_id, eu_ids_of_enseignement):
+            for eu in eu_ids_of_enseignement:
+                if eu_id == eu.name:
+                    return eu
         list_to_tasks = []
+        eu_ids_of_enseignement = Enseignement().get_eu()
         for eu_id_item in self.eu_id_items:
-            list_to_tasks.append(EuTask(eu_id=eu_id_item[0], name=eu_id_item[1]))
+            eu = get_eu_id_in_enseignement(eu_id_item, eu_ids_of_enseignement)
+            if eu:
+                list_to_tasks.append(EuTask(eu_id=eu))
 
         for presentation_url in self.presentation_urls:
             list_to_tasks.append(
@@ -70,7 +80,7 @@ class MyLoader(TaskLoader2):
             )
 
         if not list_to_tasks:
-            for eu_id in Enseignement().get_eu():
+            for eu_id in eu_ids_of_enseignement:
                 list_to_tasks.append(EuTask(eu_id=eu_id))
 
         return list(chain(
@@ -78,18 +88,24 @@ class MyLoader(TaskLoader2):
             ))
 
 
-@click.command()
+@click.group
+def main():
+    pass
+
+@main.command()
 @click.option('--output-dir',required=True , type=click.Path(
         file_okay=False, dir_okay=True, writable=True, exists=True
     )
 )
-@click.option('eu_id_items', '--eu-id', nargs=2, multiple=True, type=(int, str))
+@click.option('eu_id_items', '--eu-id', multiple=True, type=str)
 @click.option('--presentation-url', multiple=True, type=str)
 @click.option('--username', envvar='CNAM_USERNAME', prompt=True, hide_input=True, required=True)
 @click.option('--password', envvar='CNAM_PASSWORD', prompt=True, required=True)
 @click.option('--verbosity', type=click.IntRange(0, 2), default=0)
+@click.option('--yt-dl-path', type=str, default='yt-dlp')
+@click.option('--ffmpeg-path', type=str, default='ffmpeg')
 # pylint: disable=too-many-arguments
-def main(*,output_dir, eu_id_items, presentation_url, username, password, verbosity):
+def download(*,output_dir, eu_id_items, presentation_url, username, password, verbosity, yt_dl_path, ffmpeg_path):
     """
     Fonction principale
     """
@@ -100,10 +116,20 @@ def main(*,output_dir, eu_id_items, presentation_url, username, password, verbos
                 eu_id_items,
                 presentation_url,
                 credential=Credential(username=username, password=password),
-                verbosity=verbosity
+                verbosity=verbosity,
+                yt_dl_path=yt_dl_path,
+                ffmpeg_path=ffmpeg_path
             )
         ).run([])
     )
+
+@main.command()
+@click.option('--username', envvar='CNAM_USERNAME', prompt=True, hide_input=True, required=True)
+@click.option('--password', envvar='CNAM_PASSWORD', prompt=True, required=True)
+def list_eu(username, password):
+    authentification(username, password)
+    for eu in Enseignement().get_eu():
+        print(eu.name)
 
 if __name__ =='__main__':
     # pylint: disable=no-value-for-parameter, missing-kwoa

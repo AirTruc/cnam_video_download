@@ -4,8 +4,9 @@ Ce fichier contient la tâche principale de création de la vidéo d'une présen
 # pylint: disable=abstract-method
 from pathlib import Path
 from urllib.parse import urlparse
-from pydantic import TypeAdapter, BaseModel
+from itertools import chain
 
+from pydantic import TypeAdapter, BaseModel
 from doit.task import Task
 
 from cnam.video_downloader.tasks.presentation.make_video import (
@@ -14,6 +15,7 @@ from cnam.video_downloader.tasks.presentation.make_video import (
     DeskShares,
     DeskShare,
     Metadata,
+    Dimension
 )
 from cnam.video_downloader.model.presentation.shapes_svg import Svg
 from cnam.video_downloader.model.presentation.desk_shares_xml import (
@@ -26,8 +28,10 @@ from cnam.video_downloader.model.presentation.external_videos_json import (
     ExternalVideo as ExternalVideoJson,
 )
 from cnam.video_downloader.tasks.shared.generic_task import GenericTask
-from cnam.video_downloader.session import requests_session
-from cnam.video_downloader.utils import build_local_file, youtube_dl_bin
+from cnam.video_downloader.session import download_file
+from cnam.video_downloader.utils import (
+    build_local_file, build_download_video_youtube_task, is_file_exist
+)
 
 
 class PresentationIdMissing(Exception):
@@ -63,23 +67,6 @@ def get_base_files_from_presentation(presentation_id):
         build_local_file(presentation_id, "deskshare.webm"): "deskshare/deskshare.webm",
     }
 
-
-def is_file_exist(filename):
-    """
-    Test l'exitance d'un fichier
-    """
-    return Path(filename).is_file()
-
-
-def download_file(path, targets):
-    """
-    Télécharge un fichier depuis le site du CNAM
-    """
-    session = requests_session.get()
-    req = session.get(path)
-    if req.status_code == 200:
-        with open(targets[0], mode="wb") as fd:
-            fd.write(req.content)
 
 
 class PresentationId(BaseModel):
@@ -245,6 +232,8 @@ class DownloadSlides(BasePresentationTask):
         def gen_tasks(fd):
             mydoc: Svg = Svg.from_xml(fd.read())
             for image in mydoc.root:
+                if image.is_desk_share_image:
+                    continue
                 filename = image.a_id
                 target_svg = self.build_local_file(f"slides/{filename}{image.suffix}")
                 target_png = self.build_local_file(f"slides/{filename}.png")
@@ -288,19 +277,12 @@ class DownloadExternalVideos(BasePresentationTask):
     """
     def to_tasks(self):
         def gen_tasks(fd):
-            youtube_dl = youtube_dl_bin.get()
             external_videos = TypeAdapter(ExternalVideoJson).validate_json(fd.read())
             for index, external_video in enumerate(external_videos.root):
                 target = self.build_local_file(f"video/external_video_{index}.mkv")
                 if external_video.external_video_url is None:
                     continue
-                yield {
-                    "name": target,
-                    "actions": [
-                        f"{youtube_dl} -o {target} {external_video.external_video_url} || true"
-                    ],
-                    "targets": [target],
-                }
+                yield build_download_video_youtube_task(external_video.external_video_url, target)
 
         try:
             with open(
@@ -332,7 +314,7 @@ class MakeVideoTask(BasePresentationTask):
                     width=image.a_width,
                     height=image.a_height,
                 )
-                for image in mydoc.root
+                for image in mydoc.root if not image.is_desk_share_image
             ]
         mydoc = self.deskshare
         if mydoc:
@@ -348,10 +330,13 @@ class MakeVideoTask(BasePresentationTask):
                     for event in mydoc.root
                 ],
             )
+        max_width = max(map(lambda x: x.width, chain(self.shapes.root, self.deskshare.root)))
+        max_height = max(map(lambda x: x.height, chain(self.shapes.root, self.deskshare.root)))
         yield from make_video_task(
             output=self.build_local_file("video.mkv"),
             slides=slides,
             metadata=self.metadata,
+            dimension=Dimension(width=max_width, height=max_height),
             audio_file=self.build_local_file("webcams.webm"),
             desk_shares=desk_shares,
         )
