@@ -63,6 +63,9 @@ class MyLoader(TaskLoader2):
                     return eu
         list_to_tasks = []
         eu_ids_of_enseignement = Enseignement().get_eu()
+        click.echo('Listes des EUs trouvées:')
+        for eu in eu_ids_of_enseignement:
+            click.echo(f'\t- {eu.name} ({eu.url})')
         for eu_id_item in self.eu_id_items:
             eu = get_eu_id_in_enseignement(eu_id_item, eu_ids_of_enseignement)
             if eu:
