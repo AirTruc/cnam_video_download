@@ -17,6 +17,7 @@ requirements = [
 ]
 
 requirements_tests = [
+    'requests-mock',
 ]
 
 extras = {
