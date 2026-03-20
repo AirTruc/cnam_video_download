@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import requests_mock
 
-from cnam.video_downloader.tasks.eu.eu import (
+from cnam.video_downloader.tasks.eu.eu_page import (
     get_links_from_page,
     LinkResource,
     attr_link_extractor_from_page,

@@ -6,7 +6,7 @@ import re
 from bs4 import BeautifulSoup
 
 from cnam.video_downloader.session import requests_session
-from cnam.video_downloader.tasks.eu.eu import EuId
+from cnam.video_downloader.tasks.eu.eu_id import EuId
 
 class EuNameError(Exception):
     """

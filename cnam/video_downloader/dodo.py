@@ -13,7 +13,8 @@ from pydantic import  BaseModel
 
 
 from cnam.video_downloader.tasks.presentation.presentation import Presentation, PresentationId
-from cnam.video_downloader.tasks.eu.eu import EuTask, base_dir, EuId
+from cnam.video_downloader.tasks.eu.eu import EuTask
+from cnam.video_downloader.tasks.eu.eu_generic import base_dir
 from cnam.video_downloader.enseignement import Enseignement
 from cnam.video_downloader.session import authentification
 from cnam.video_downloader.utils import youtube_dl_bin, ffmpeg_bin
